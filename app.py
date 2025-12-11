@@ -332,13 +332,13 @@ if st.button("Calcular projeção de banho"):
 
     # Seleciona apenas as colunas finais, na ordem desejada
     colunas_final = [
-        "Ref / Produto",
-        "Proj.",
-        "Estoque",
-        "Produção",
-        "Retorno",
-        "Coberta",
-        "Enviar (30%)",
+        "Produto",
+        "Previsão de Venda",
+        "Estoque Atual",
+        "Em Produção",
+        "Banhando",
+        "Estoque/Produção/Banho",
+        "Enviar",
     ]
     df_resultado = df_resultado[colunas_final]
 
@@ -357,4 +357,5 @@ if st.button("Calcular projeção de banho"):
         file_name="projecao_banho_metais.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
 
