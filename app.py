@@ -333,12 +333,12 @@ if st.button("Calcular projeção de banho"):
         columns={
             "referencia": "Referência",
             "banho": "Tipo de banho",
-            "qtd_projetada": "Quantidade projetada",
-            "qtd_estoque": "Quantidade em estoque atual",
-            "qtd_producao": "Quantidade em produção",
-            "qtd_retorno": "Quantidade em retorno de banho",
-            "qtd_ja_coberta": "Quantidade já coberta (estoque + produção + retorno)",
-            "qtd_a_enviar_margem": "Quantidade a enviar (margem 30%)",
+            "qtd_projetada": "Previsão de Venda",
+            "qtd_estoque": "Estoque atual",
+            "qtd_producao": "Em produção",
+            "qtd_retorno": "Em retorno de banho",
+            "qtd_ja_coberta": "Quantidade Total (estoque+produção+banho)",
+            "qtd_a_enviar_margem": "Quantidade a enviar",
         }
     )
 
@@ -368,3 +368,4 @@ if st.button("Calcular projeção de banho"):
         file_name="projecao_banho_metais.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
