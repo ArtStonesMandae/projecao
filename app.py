@@ -3,37 +3,12 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Projeção de Banho (Ouro)", layout="wide")
+st.set_page_config(page_title="Projeção de Banho", layout="wide")
 
-st.title("Projeção de Metais para Banho (Ouro)")
+st.title("Projeção de Metais para Banho")
 
 st.markdown(
-    """
-Fluxo de uso:
 
-1. **RETORNO DE BANHO**  
-   - Peças já enviadas para o banho, mas **ainda não voltaram**.  
-   - Colunas usadas: `Produto`, `Categoria`, `A Produzir`.
-
-2. **PRODUÇÃO**  
-   - Peças que **já voltaram do banho** e estão em produção.  
-   - Mesmo layout: `Produto`, `Categoria`, `A Produzir`.
-
-3. **PROJEÇÃO (WM10)**  
-   - Relatório de previsão do WM10 (exportado em `.xls`).  
-   - Colunas usadas: `Referência`, `Produto`,
-     coluna que começa com **"Previsão de Venda"** e, se existir,
-     coluna que começa com **"Estoque Atual"**.
-
-O app cruza tudo por **Referência** e calcula:
-
-- Quantidade projetada
-- Estoque atual
-- Quantidade em produção
-- Quantidade em retorno de banho
-- Quantidade já coberta (estoque + produção + retorno)
-- Quantidade a enviar com **30% de margem**
-"""
 )
 
 # ------------------------------------------------------------------ #
@@ -357,3 +332,4 @@ if st.button("Calcular projeção de banho"):
         file_name="projecao_banho_metais.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
