@@ -1,6 +1,7 @@
 import io
 import pandas as pd
 import streamlit as st
+import xlrd  # usado apenas para ler .xls diretamente
 
 st.set_page_config(page_title="Projeção de Banho (Ouro/Ródio)", layout="wide")
 
@@ -35,6 +36,37 @@ O app cruza tudo por **Referência + Tipo de Banho** e calcula:
 # -------------------- Funções auxiliares --------------------
 
 
+def ler_xls_com_xlrd(uploaded_file):
+    """
+    Lê um .xls antigo usando xlrd diretamente (sem pandas.read_excel)
+    e devolve um DataFrame.
+    """
+    # lê todo o conteúdo em bytes
+    data = uploaded_file.read()
+
+    # abre o workbook a partir dos bytes
+    book = xlrd.open_workbook(file_contents=data)
+    sheet = book.sheet_by_index(0)
+
+    # primeira linha é cabeçalho
+    headers = [str(sheet.cell_value(0, c)).strip() for c in range(sheet.ncols)]
+
+    rows = []
+    for r in range(1, sheet.nrows):
+        row_dict = {}
+        empty_row = True
+        for c, col_name in enumerate(headers):
+            value = sheet.cell_value(r, c)
+            if value not in ("", None):
+                empty_row = False
+            row_dict[col_name] = value
+        if not empty_row:
+            rows.append(row_dict)
+
+    df = pd.DataFrame(rows)
+    return df
+
+
 def carregar_planilha(uploaded_file):
     """Lê CSV/XLS/XLSX em um DataFrame, usando o engine correto para cada formato."""
     if uploaded_file is None:
@@ -44,10 +76,9 @@ def carregar_planilha(uploaded_file):
 
     try:
         if nome.endswith(".xls"):
-            # Arquivos antigos (WM10): xlrd 1.2.0
-            df = pd.read_excel(uploaded_file, engine="xlrd")
+            # Usamos xlrd direto, sem pandas.read_excel, para evitar conflito de versões
+            df = ler_xls_com_xlrd(uploaded_file)
         elif nome.endswith(".xlsx"):
-            # Arquivos xlsx modernos
             df = pd.read_excel(uploaded_file, engine="openpyxl")
         elif nome.endswith(".csv"):
             # sep=None detecta ; , \t automaticamente
