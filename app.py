@@ -1,7 +1,7 @@
 import io
+import re
 import pandas as pd
 import streamlit as st
-import xlrd  # usado apenas para ler .xls diretamente
 
 st.set_page_config(page_title="Projeção de Banho (Ouro/Ródio)", layout="wide")
 
@@ -20,12 +20,13 @@ Fluxo de uso:
    - Mesmo layout: `Produto`, `Categoria`, `A Produzir`.
 
 3. **PROJEÇÃO (WM10)**  
-   - Projeção de peças a serem banhadas.  
-   - Colunas usadas: `Referência`, `Banho`, `Previsão de Venda`.
+   - Relatório de previsão do WM10 (exportado em `.xls`).  
+   - Colunas usadas: `Referência`, `Produto` e a coluna que começa com
+     **"Previsão de Venda"**.
 
 O app cruza tudo por **Referência + Tipo de Banho** e calcula:
 
-- Quantidade projetada (Previsão de Venda)
+- Quantidade projetada
 - Quantidade em produção
 - Quantidade em retorno de banho
 - Quantidade já coberta
@@ -33,42 +34,58 @@ O app cruza tudo por **Referência + Tipo de Banho** e calcula:
 """
 )
 
-# -------------------- Funções auxiliares --------------------
+# ------------------------------------------------------------------ #
+# Funções auxiliares
+# ------------------------------------------------------------------ #
 
 
-def ler_xls_com_xlrd(uploaded_file):
+def infer_banho(produto: str) -> str:
+    """Tenta inferir o tipo de banho a partir do texto do produto."""
+    s = str(produto).upper()
+    if "OURO" in s:
+        return "Ouro"
+    if "RÓDIO" in s or "RODIO" in s:
+        return "Ródio"
+    if "PRATA" in s:
+        return "Prata"
+    return "Desconhecido"
+
+
+def carregar_xls_html(uploaded_file) -> pd.DataFrame:
     """
-    Lê um .xls antigo usando xlrd diretamente (sem pandas.read_excel)
-    e devolve um DataFrame.
+    Muitos relatórios do WM10 são HTML disfarçado de .xls.
+    Aqui usamos read_html e promovemos a primeira linha a cabeçalho.
     """
-    # lê todo o conteúdo em bytes
     data = uploaded_file.read()
 
-    # abre o workbook a partir dos bytes
-    book = xlrd.open_workbook(file_contents=data)
-    sheet = book.sheet_by_index(0)
+    if not data.lstrip().startswith(b"<"):
+        st.error(
+            "O arquivo .xls não parece ser um relatório HTML do WM10. "
+            "Tente exportar novamente ou converter para .xlsx/.csv."
+        )
+        return None
 
-    # primeira linha é cabeçalho
-    headers = [str(sheet.cell_value(0, c)).strip() for c in range(sheet.ncols)]
+    try:
+        tables = pd.read_html(io.BytesIO(data))
+    except Exception as e:
+        st.error(f"Não foi possível ler o relatório WM10 (.xls): {e}")
+        return None
 
-    rows = []
-    for r in range(1, sheet.nrows):
-        row_dict = {}
-        empty_row = True
-        for c, col_name in enumerate(headers):
-            value = sheet.cell_value(r, c)
-            if value not in ("", None):
-                empty_row = False
-            row_dict[col_name] = value
-        if not empty_row:
-            rows.append(row_dict)
+    if not tables:
+        st.error("Nenhuma tabela encontrada no relatório WM10.")
+        return None
 
-    df = pd.DataFrame(rows)
-    return df
+    df = tables[0]
+
+    # Primeira linha é o cabeçalho
+    df2 = df.iloc[1:].copy()
+    df2.columns = df.iloc[0]
+
+    return df2
 
 
-def carregar_planilha(uploaded_file):
-    """Lê CSV/XLS/XLSX em um DataFrame, usando o engine correto para cada formato."""
+def carregar_planilha(uploaded_file) -> pd.DataFrame:
+    """Lê CSV/XLSX normalmente e .XLS (WM10) via HTML."""
     if uploaded_file is None:
         return None
 
@@ -76,13 +93,11 @@ def carregar_planilha(uploaded_file):
 
     try:
         if nome.endswith(".xls"):
-            # Usamos xlrd direto, sem pandas.read_excel, para evitar conflito de versões
-            df = ler_xls_com_xlrd(uploaded_file)
+            return carregar_xls_html(uploaded_file)
         elif nome.endswith(".xlsx"):
-            df = pd.read_excel(uploaded_file, engine="openpyxl")
+            return pd.read_excel(uploaded_file, engine="openpyxl")
         elif nome.endswith(".csv"):
-            # sep=None detecta ; , \t automaticamente
-            df = pd.read_csv(uploaded_file, sep=None, engine="python")
+            return pd.read_csv(uploaded_file, sep=None, engine="python")
         else:
             st.error(f"Formato não suportado: {uploaded_file.name}")
             return None
@@ -90,16 +105,14 @@ def carregar_planilha(uploaded_file):
         st.error(f"Erro ao ler {uploaded_file.name}: {e}")
         return None
 
-    return df
 
-
-def preparar_retorno_ou_producao(df, nome_qtd):
+def preparar_retorno_ou_producao(df: pd.DataFrame, nome_qtd: str) -> pd.DataFrame:
     """
-    Prepara base de RETORNO ou PRODUÇÃO a partir de um layout padrão:
+    Prepara base de RETORNO ou PRODUÇÃO:
 
-    - Produto (texto: "FO040 - Nome da peça")
-    - Categoria (tipo de banho: "Ouro", "Ródio"...)
-    - A Produzir (quantidade)
+    - Produto: "FO040 - Nome da peça"
+    - Categoria: tipo de banho (Ouro, Ródio, etc.)
+    - A Produzir: quantidade
     """
     col_obrigatorias = {"Produto", "Categoria", "A Produzir"}
     faltando = col_obrigatorias.difference(df.columns)
@@ -128,37 +141,72 @@ def preparar_retorno_ou_producao(df, nome_qtd):
     return base
 
 
-def preparar_projecao(df):
+def preparar_projecao(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Prepara base de PROJEÇÃO (WM10):
+    Prepara base de PROJEÇÃO a partir do relatório WM10:
 
-    - Referência
-    - Banho
-    - Previsão de Venda
+    Esperado na planilha já lida:
+    - Coluna 'Referência'
+    - Coluna 'Produto'
+    - Uma coluna cujo nome começa com 'Previsão de Venda'
+      (ex.: 'Previsão de Venda até 11/02/2026')
     """
-    col_obrigatorias = {"Referência", "Banho", "Previsão de Venda"}
-    faltando = col_obrigatorias.difference(df.columns)
-    if faltando:
+    if df is None:
+        return None
+
+    cols = df.columns
+
+    if "Referência" not in cols or "Produto" not in cols:
         st.error(
-            f"A planilha de PROJEÇÃO não contém as colunas obrigatórias {faltando}. "
-            "Confirme se exportou o relatório correto do WM10."
+            "A planilha do WM10 precisa ter as colunas 'Referência' e 'Produto'. "
+            "Verifique o layout do relatório."
         )
         return None
 
-    base = (
-        df.assign(
-            referencia=lambda d: d["Referência"].astype(str).str.strip(),
-            banho=lambda d: d["Banho"].astype(str).str.strip(),
-            qtd_projetada=lambda d: pd.to_numeric(
-                d["Previsão de Venda"], errors="coerce"
-            ).fillna(0),
-        )[["referencia", "banho", "qtd_projetada"]]
+    # Localiza a coluna de previsão de venda (o texto muda por causa da data)
+    forecast_col = None
+    for c in cols:
+        if isinstance(c, str) and c.startswith("Previsão de Venda"):
+            forecast_col = c
+            break
+
+    if not forecast_col:
+        st.error(
+            "Não foi encontrada nenhuma coluna que comece com 'Previsão de Venda' "
+            "na planilha do WM10."
+        )
+        return None
+
+    df2 = df.copy()
+
+    # Remove linhas de totais/rodapé
+    df2 = df2[df2["Referência"].notna()]
+    df2 = df2[df2["Referência"] != "Referência"]
+    df2 = df2[
+        ~df2["Referência"]
+        .astype(str)
+        .str.contains("Totais|Previs", case=False, na=False)
+    ]
+
+    # Extrai apenas o número da previsão (ex.: '28 UN' -> 28)
+    raw_forecast = df2[forecast_col].astype(str)
+    nums = raw_forecast.str.extract(r"(\d+)")[0]
+    qtd_projetada = pd.to_numeric(nums, errors="coerce").fillna(0)
+
+    base = pd.DataFrame(
+        {
+            "referencia": df2["Referência"].astype(str).str.strip(),
+            "banho": df2["Produto"].map(infer_banho),
+            "qtd_projetada": qtd_projetada,
+        }
     )
 
     return base
 
 
-# -------------------- Upload dos arquivos --------------------
+# ------------------------------------------------------------------ #
+# Upload dos arquivos
+# ------------------------------------------------------------------ #
 
 st.subheader("1. Upload das planilhas")
 
@@ -180,7 +228,7 @@ with col2:
 
 with col3:
     file_proj = st.file_uploader(
-        "PROJEÇÃO (WM10)",
+        "PROJEÇÃO (WM10 - .xls / HTML)",
         type=["xlsx", "xls", "csv"],
         key="proj",
     )
@@ -189,7 +237,9 @@ if not (file_retorno and file_producao and file_proj):
     st.info("Envie as **três planilhas** para iniciar o cálculo.")
     st.stop()
 
-# -------------------- Leitura das planilhas --------------------
+# ------------------------------------------------------------------ #
+# Leitura das planilhas
+# ------------------------------------------------------------------ #
 
 df_retorno_raw = carregar_planilha(file_retorno)
 df_producao_raw = carregar_planilha(file_producao)
@@ -210,12 +260,13 @@ with st.expander("Pré-visualização rápida das planilhas"):
     st.markdown("### Projeção (WM10)")
     st.dataframe(df_proj_raw.head(), use_container_width=True)
 
-# -------------------- Processamento --------------------
+# ------------------------------------------------------------------ #
+# Processamento
+# ------------------------------------------------------------------ #
 
 st.subheader("2. Processar e calcular projeção")
 
 if st.button("Calcular projeção de banho"):
-    # Bases consolidadas
     base_retorno = preparar_retorno_ou_producao(df_retorno_raw, "qtd_retorno")
     base_producao = preparar_retorno_ou_producao(df_producao_raw, "qtd_producao")
     base_proj = preparar_projecao(df_proj_raw)
@@ -223,7 +274,7 @@ if st.button("Calcular projeção de banho"):
     if base_retorno is None or base_producao is None or base_proj is None:
         st.stop()
 
-    # Junção das bases
+    # Merge das bases
     df_merge = (
         base_proj.merge(
             base_producao, on=["referencia", "banho"], how="left"
@@ -260,7 +311,6 @@ if st.button("Calcular projeção de banho"):
 
     st.subheader("3. Resultado consolidado")
 
-    # Filtro por tipo de banho
     tipos_banho = sorted(df_resultado["Tipo de banho"].dropna().unique().tolist())
     filtro_banho = st.multiselect(
         "Filtrar por tipo de banho (opcional)",
