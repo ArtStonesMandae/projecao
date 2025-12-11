@@ -1,5 +1,6 @@
 import io
 import re
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -21,16 +22,18 @@ Fluxo de uso:
 
 3. **PROJEÇÃO (WM10)**  
    - Relatório de previsão do WM10 (exportado em `.xls`).  
-   - Colunas usadas: `Referência`, `Produto` e a coluna que começa com
-     **"Previsão de Venda"**.
+   - Colunas usadas: `Referência`, `Produto`,
+     coluna que começa com **"Previsão de Venda"** e, se existir,
+     coluna que começa com **"Estoque Atual"**.
 
 O app cruza tudo por **Referência + Tipo de Banho** e calcula:
 
 - Quantidade projetada
+- Estoque atual
 - Quantidade em produção
 - Quantidade em retorno de banho
-- Quantidade já coberta
-- Quantidade que ainda precisa ser enviada para o banho.
+- Quantidade já coberta (estoque + produção + retorno)
+- Quantidade a enviar (com 30% de margem)
 """
 )
 
@@ -53,8 +56,8 @@ def infer_banho(produto: str) -> str:
 
 def carregar_xls_html(uploaded_file) -> pd.DataFrame:
     """
-    Muitos relatórios do WM10 são HTML disfarçado de .xls.
-    Aqui usamos read_html e promovemos a primeira linha a cabeçalho.
+    Relatórios do WM10 vêm como HTML disfarçado de .xls.
+    Usa read_html e promove a primeira linha a cabeçalho.
     """
     data = uploaded_file.read()
 
@@ -148,8 +151,8 @@ def preparar_projecao(df: pd.DataFrame) -> pd.DataFrame:
     Esperado na planilha já lida:
     - Coluna 'Referência'
     - Coluna 'Produto'
-    - Uma coluna cujo nome começa com 'Previsão de Venda'
-      (ex.: 'Previsão de Venda até 11/02/2026')
+    - Coluna cujo nome começa com 'Previsão de Venda'
+    - Opcional: coluna cujo nome começa com 'Estoque Atual'
     """
     if df is None:
         return None
@@ -163,7 +166,7 @@ def preparar_projecao(df: pd.DataFrame) -> pd.DataFrame:
         )
         return None
 
-    # Localiza a coluna de previsão de venda (o texto muda por causa da data)
+    # Localiza a coluna de previsão de venda (texto muda por causa da data)
     forecast_col = None
     for c in cols:
         if isinstance(c, str) and c.startswith("Previsão de Venda"):
@@ -177,6 +180,13 @@ def preparar_projecao(df: pd.DataFrame) -> pd.DataFrame:
         )
         return None
 
+    # Localiza a coluna de estoque atual (se existir)
+    estoque_col = None
+    for c in cols:
+        if isinstance(c, str) and c.startswith("Estoque Atual"):
+            estoque_col = c
+            break
+
     df2 = df.copy()
 
     # Remove linhas de totais/rodapé
@@ -188,16 +198,25 @@ def preparar_projecao(df: pd.DataFrame) -> pd.DataFrame:
         .str.contains("Totais|Previs", case=False, na=False)
     ]
 
-    # Extrai apenas o número da previsão (ex.: '28 UN' -> 28)
+    # Previsão de venda: extrai apenas o número (ex.: '28 UN' -> 28)
     raw_forecast = df2[forecast_col].astype(str)
-    nums = raw_forecast.str.extract(r"(\d+)")[0]
-    qtd_projetada = pd.to_numeric(nums, errors="coerce").fillna(0)
+    nums_forecast = raw_forecast.str.extract(r"(\d+)")[0]
+    qtd_projetada = pd.to_numeric(nums_forecast, errors="coerce").fillna(0)
+
+    # Estoque atual: se a coluna existir, extrai número; se não, zera
+    if estoque_col:
+        raw_stock = df2[estoque_col].astype(str)
+        nums_stock = raw_stock.str.extract(r"(\d+)")[0]
+        qtd_estoque = pd.to_numeric(nums_stock, errors="coerce").fillna(0)
+    else:
+        qtd_estoque = pd.Series(0, index=df2.index, dtype="float64")
 
     base = pd.DataFrame(
         {
             "referencia": df2["Referência"].astype(str).str.strip(),
             "banho": df2["Produto"].map(infer_banho),
             "qtd_projetada": qtd_projetada,
+            "qtd_estoque": qtd_estoque,
         }
     )
 
@@ -285,13 +304,25 @@ if st.button("Calcular projeção de banho"):
     )
 
     # Trata NaN como 0
-    for col in ["qtd_projetada", "qtd_producao", "qtd_retorno"]:
+    for col in ["qtd_projetada", "qtd_producao", "qtd_retorno", "qtd_estoque"]:
         df_merge[col] = pd.to_numeric(df_merge[col], errors="coerce").fillna(0)
 
     # Cálculos finais
-    df_merge["qtd_ja_coberta"] = df_merge["qtd_producao"] + df_merge["qtd_retorno"]
-    df_merge["qtd_a_enviar"] = df_merge["qtd_projetada"] - df_merge["qtd_ja_coberta"]
-    df_merge["qtd_a_enviar"] = df_merge["qtd_a_enviar"].clip(lower=0)
+    df_merge["qtd_ja_coberta"] = (
+        df_merge["qtd_producao"] + df_merge["qtd_retorno"] + df_merge["qtd_estoque"]
+    )
+
+    df_merge["qtd_a_enviar_base"] = (
+        df_merge["qtd_projetada"] - df_merge["qtd_ja_coberta"]
+    ).clip(lower=0)
+
+    # Margem de 30% e arredondamento para cima
+    df_merge["qtd_a_enviar_margem"] = np.ceil(
+        df_merge["qtd_a_enviar_base"] * 1.3
+    ).astype(int)
+
+    # Remove itens que de fato não precisam ser mandados para banho
+    df_merge = df_merge[df_merge["qtd_a_enviar_margem"] > 0].reset_index(drop=True)
 
     # Ordenação
     df_merge = df_merge.sort_values(by=["banho", "referencia"]).reset_index(drop=True)
@@ -302,10 +333,12 @@ if st.button("Calcular projeção de banho"):
             "referencia": "Referência",
             "banho": "Tipo de banho",
             "qtd_projetada": "Quantidade projetada",
+            "qtd_estoque": "Quantidade em estoque atual",
             "qtd_producao": "Quantidade em produção",
             "qtd_retorno": "Quantidade em retorno de banho",
-            "qtd_ja_coberta": "Quantidade já coberta",
-            "qtd_a_enviar": "Quantidade a enviar para o banho",
+            "qtd_ja_coberta": "Quantidade já coberta (estoque + produção + retorno)",
+            "qtd_a_enviar_base": "Quantidade a enviar (sem margem)",
+            "qtd_a_enviar_margem": "Quantidade a enviar (margem 30%)",
         }
     )
 
