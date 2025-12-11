@@ -33,7 +33,7 @@ O app cruza tudo por **Referência + Tipo de Banho** e calcula:
 - Quantidade em produção
 - Quantidade em retorno de banho
 - Quantidade já coberta (estoque + produção + retorno)
-- Quantidade a enviar (com 30% de margem)
+- Quantidade a enviar com **30% de margem**
 """
 )
 
@@ -312,16 +312,17 @@ if st.button("Calcular projeção de banho"):
         df_merge["qtd_producao"] + df_merge["qtd_retorno"] + df_merge["qtd_estoque"]
     )
 
-    df_merge["qtd_a_enviar_base"] = (
+    # Base sem margem (apenas para cálculo interno)
+    qtd_a_enviar_base = (
         df_merge["qtd_projetada"] - df_merge["qtd_ja_coberta"]
     ).clip(lower=0)
 
     # Margem de 30% e arredondamento para cima
     df_merge["qtd_a_enviar_margem"] = np.ceil(
-        df_merge["qtd_a_enviar_base"] * 1.3
+        qtd_a_enviar_base * 1.3
     ).astype(int)
 
-    # Remove itens que de fato não precisam ser mandados para banho
+    # Só mantém itens que realmente precisam ser enviados
     df_merge = df_merge[df_merge["qtd_a_enviar_margem"] > 0].reset_index(drop=True)
 
     # Ordenação
@@ -337,7 +338,6 @@ if st.button("Calcular projeção de banho"):
             "qtd_producao": "Quantidade em produção",
             "qtd_retorno": "Quantidade em retorno de banho",
             "qtd_ja_coberta": "Quantidade já coberta (estoque + produção + retorno)",
-            "qtd_a_enviar_base": "Quantidade a enviar (sem margem)",
             "qtd_a_enviar_margem": "Quantidade a enviar (margem 30%)",
         }
     )
