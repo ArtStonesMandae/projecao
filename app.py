@@ -337,7 +337,7 @@ if st.button("Calcular projeção de banho"):
             "qtd_estoque": "Estoque atual",
             "qtd_producao": "Em produção",
             "qtd_retorno": "Em retorno de banho",
-            "qtd_ja_coberta": "Quantidade Total (estoque+produção+banho)",
+            "qtd_ja_coberta": "Quantidade Total (estoque/produção/banho)",
             "qtd_a_enviar_margem": "Quantidade a enviar",
         }
     )
@@ -368,4 +368,5 @@ if st.button("Calcular projeção de banho"):
         file_name="projecao_banho_metais.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
 
