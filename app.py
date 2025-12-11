@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Projeção de Banho", layout="wide")
+st.set_page_config(page_title="Projeção de Banho (Ouro)", layout="wide")
 
 st.title("Projeção de Metais para Banho (Ouro)")
 
@@ -320,25 +320,25 @@ if st.button("Calcular projeção de banho"):
     # Renomear para exibição com cabeçalhos compactos
     df_resultado = df_merge.rename(
         columns={
-            "ref_produto": "Produto",
-            "qtd_projetada": "Previsão de Venda",
-            "qtd_estoque": "Estoque Atual",
-            "qtd_producao": "Em Produção",
-            "qtd_retorno": "Banhando",
-            "qtd_ja_coberta": "Estoque/Produção/Banho",
-            "qtd_a_enviar_margem": "Enviar",
+            "ref_produto": "Ref / Produto",
+            "qtd_projetada": "Proj.",
+            "qtd_estoque": "Estoque",
+            "qtd_producao": "Produção",
+            "qtd_retorno": "Retorno",
+            "qtd_ja_coberta": "Coberta",
+            "qtd_a_enviar_margem": "Enviar (30%)",
         }
     )
 
     # Seleciona apenas as colunas finais, na ordem desejada
     colunas_final = [
-        "Produto",
-        "Previsão de Venda",
-        "Estoque Atual",
-        "Em Produção",
-        "Banhando",
-        "Estoque/Produção/Banho",
-        "Enviar",
+        "Ref / Produto",
+        "Proj.",
+        "Estoque",
+        "Produção",
+        "Retorno",
+        "Coberta",
+        "Enviar (30%)",
     ]
     df_resultado = df_resultado[colunas_final]
 
@@ -357,5 +357,3 @@ if st.button("Calcular projeção de banho"):
         file_name="projecao_banho_metais.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
-
-
