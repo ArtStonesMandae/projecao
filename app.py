@@ -6,9 +6,6 @@ import streamlit as st
 st.set_page_config(page_title="Projeção de Banho", layout="wide")
 
 st.title("Projeção de Metais para Banho")
-
-st.markdown(
-
 )
 
 # ------------------------------------------------------------------ #
@@ -332,4 +329,5 @@ if st.button("Calcular projeção de banho"):
         file_name="projecao_banho_metais.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
 
