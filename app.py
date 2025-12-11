@@ -36,15 +36,19 @@ O app cruza tudo por **Referência + Tipo de Banho** e calcula:
 
 
 def carregar_planilha(uploaded_file):
-    """Lê CSV/XLS/XLSX em um DataFrame."""
+    """Lê CSV/XLS/XLSX em um DataFrame, usando o engine correto para cada formato."""
     if uploaded_file is None:
         return None
 
     nome = uploaded_file.name.lower()
 
     try:
-        if nome.endswith((".xlsx", ".xls")):
-            df = pd.read_excel(uploaded_file)
+        if nome.endswith(".xls"):
+            # Arquivos antigos (WM10): xlrd 1.2.0
+            df = pd.read_excel(uploaded_file, engine="xlrd")
+        elif nome.endswith(".xlsx"):
+            # Arquivos xlsx modernos
+            df = pd.read_excel(uploaded_file, engine="openpyxl")
         elif nome.endswith(".csv"):
             # sep=None detecta ; , \t automaticamente
             df = pd.read_csv(uploaded_file, sep=None, engine="python")
@@ -248,8 +252,5 @@ if st.button("Calcular projeção de banho"):
         label="Baixar resultado em Excel",
         data=buffer.getvalue(),
         file_name="projecao_banho_metais.xlsx",
-        mime=(
-            "application/vnd.openxmlformats-officedocument."
-            "spreadsheetml.sheet"
-        ),
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
