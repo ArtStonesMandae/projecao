@@ -1,12 +1,11 @@
 import io
-import re
 import numpy as np
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Projeção de Banho (Ouro/Ródio)", layout="wide")
+st.set_page_config(page_title="Projeção de Banho (Ouro)", layout="wide")
 
-st.title("Projeção de Metais para Banho")
+st.title("Projeção de Metais para Banho (Ouro)")
 
 st.markdown(
     """
@@ -26,7 +25,7 @@ Fluxo de uso:
      coluna que começa com **"Previsão de Venda"** e, se existir,
      coluna que começa com **"Estoque Atual"**.
 
-O app cruza tudo por **Referência + Tipo de Banho** e calcula:
+O app cruza tudo por **Referência** e calcula:
 
 - Quantidade projetada
 - Estoque atual
@@ -40,18 +39,6 @@ O app cruza tudo por **Referência + Tipo de Banho** e calcula:
 # ------------------------------------------------------------------ #
 # Funções auxiliares
 # ------------------------------------------------------------------ #
-
-
-def infer_banho(produto: str) -> str:
-    """Tenta inferir o tipo de banho a partir do texto do produto."""
-    s = str(produto).upper()
-    if "OURO" in s:
-        return "Ouro"
-    if "RÓDIO" in s or "RODIO" in s:
-        return "Ródio"
-    if "PRATA" in s:
-        return "Prata"
-    return "Desconhecido"
 
 
 def carregar_xls_html(uploaded_file) -> pd.DataFrame:
@@ -114,7 +101,7 @@ def preparar_retorno_ou_producao(df: pd.DataFrame, nome_qtd: str) -> pd.DataFram
     Prepara base de RETORNO ou PRODUÇÃO:
 
     - Produto: "FO040 - Nome da peça"
-    - Categoria: tipo de banho (Ouro, Ródio, etc.)
+    - Categoria: tipo de banho (não é mais usada, mas precisa existir)
     - A Produzir: quantidade
     """
     col_obrigatorias = {"Produto", "Categoria", "A Produzir"}
@@ -133,10 +120,9 @@ def preparar_retorno_ou_producao(df: pd.DataFrame, nome_qtd: str) -> pd.DataFram
             .str.split(" - ")
             .str[0]
             .str.strip(),
-            banho=lambda d: d["Categoria"].astype(str).str.strip(),
             qtd=lambda d: pd.to_numeric(d["A Produzir"], errors="coerce").fillna(0),
-        )[["referencia", "banho", "qtd"]]
-        .groupby(["referencia", "banho"], as_index=False)["qtd"]
+        )[["referencia", "qtd"]]
+        .groupby(["referencia"], as_index=False)["qtd"]
         .sum()
         .rename(columns={"qtd": nome_qtd})
     )
@@ -214,7 +200,7 @@ def preparar_projecao(df: pd.DataFrame) -> pd.DataFrame:
     base = pd.DataFrame(
         {
             "referencia": df2["Referência"].astype(str).str.strip(),
-            "banho": df2["Produto"].map(infer_banho),
+            "descricao": df2["Produto"].astype(str).str.strip(),
             "qtd_projetada": qtd_projetada,
             "qtd_estoque": qtd_estoque,
         }
@@ -293,14 +279,10 @@ if st.button("Calcular projeção de banho"):
     if base_retorno is None or base_producao is None or base_proj is None:
         st.stop()
 
-    # Merge das bases
+    # Merge das bases (apenas por referência, já que estamos considerando só ouro)
     df_merge = (
-        base_proj.merge(
-            base_producao, on=["referencia", "banho"], how="left"
-        )
-        .merge(
-            base_retorno, on=["referencia", "banho"], how="left"
-        )
+        base_proj.merge(base_producao, on="referencia", how="left")
+        .merge(base_retorno, on="referencia", how="left")
     )
 
     # Trata NaN como 0
@@ -312,7 +294,6 @@ if st.button("Calcular projeção de banho"):
         df_merge["qtd_producao"] + df_merge["qtd_retorno"] + df_merge["qtd_estoque"]
     )
 
-    # Base sem margem (apenas para cálculo interno)
     qtd_a_enviar_base = (
         df_merge["qtd_projetada"] - df_merge["qtd_ja_coberta"]
     ).clip(lower=0)
@@ -325,37 +306,45 @@ if st.button("Calcular projeção de banho"):
     # Só mantém itens que realmente precisam ser enviados
     df_merge = df_merge[df_merge["qtd_a_enviar_margem"] > 0].reset_index(drop=True)
 
-    # Ordenação
-    df_merge = df_merge.sort_values(by=["banho", "referencia"]).reset_index(drop=True)
+    # Coluna combinando referência + nome do produto
+    df_merge["ref_produto"] = df_merge["referencia"].astype(str).str.strip()
+    mask_desc = df_merge["descricao"].notna() & (
+        df_merge["descricao"].astype(str).str.strip() != ""
+    )
+    df_merge.loc[mask_desc, "ref_produto"] = (
+        df_merge.loc[mask_desc, "ref_produto"]
+        + " - "
+        + df_merge.loc[mask_desc, "descricao"].astype(str).str.strip()
+    )
 
-    # Renomear para exibição
+    # Renomear para exibição com cabeçalhos compactos
     df_resultado = df_merge.rename(
         columns={
-            "referencia": "Referência",
-            "banho": "Tipo de banho",
-            "qtd_projetada": "Previsão de Venda",
-            "qtd_estoque": "Estoque atual",
-            "qtd_producao": "Em produção",
-            "qtd_retorno": "Em retorno de banho",
-            "qtd_ja_coberta": "Quantidade Total (estoque/produção/banho)",
-            "qtd_a_enviar_margem": "Quantidade a enviar",
+            "ref_produto": "Ref / Produto",
+            "qtd_projetada": "Proj.",
+            "qtd_estoque": "Estoque",
+            "qtd_producao": "Produção",
+            "qtd_retorno": "Retorno",
+            "qtd_ja_coberta": "Coberta",
+            "qtd_a_enviar_margem": "Enviar (30%)",
         }
     )
 
+    # Seleciona apenas as colunas finais, na ordem desejada
+    colunas_final = [
+        "Ref / Produto",
+        "Proj.",
+        "Estoque",
+        "Produção",
+        "Retorno",
+        "Coberta",
+        "Enviar (30%)",
+    ]
+    df_resultado = df_resultado[colunas_final]
+
     st.subheader("3. Resultado consolidado")
 
-    tipos_banho = sorted(df_resultado["Tipo de banho"].dropna().unique().tolist())
-    filtro_banho = st.multiselect(
-        "Filtrar por tipo de banho (opcional)",
-        options=tipos_banho,
-        default=tipos_banho,
-    )
-
-    df_mostrar = df_resultado.copy()
-    if filtro_banho:
-        df_mostrar = df_mostrar[df_mostrar["Tipo de banho"].isin(filtro_banho)]
-
-    st.dataframe(df_mostrar, use_container_width=True)
+    st.dataframe(df_resultado, use_container_width=True)
 
     # Download em Excel
     buffer = io.BytesIO()
@@ -368,5 +357,3 @@ if st.button("Calcular projeção de banho"):
         file_name="projecao_banho_metais.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
-
-
